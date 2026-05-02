@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>定格動畫生成器</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --text: #0f172a;
+            --text-sec: #64748b;
+            --border: #e2e8f0;
+            --success: #10b981;
+            --danger: #ef4444;
+            --radius: 12px;
+            --shadow: 0 1px 3px rgba(0,0,0,.1), 0 1px 2px rgba(0,0,0,.06);
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+        #app { max-width: 900px; margin: 0 auto; padding: 24px 16px 60px; }
+        header { text-align: center; margin-bottom: 28px; }
+        header h1 { font-size: 26px; font-weight: 700; }
+        header p { color: var(--text-sec); font-size: 14px; margin-top: 4px; }
+        .card { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px; margin-bottom: 18px; }
+        .card-title { font-size: 15px; font-weight: 600; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; }
+        .hidden { display: none !important; }
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; border: none; cursor: pointer; transition: all .15s; }
+        .btn-primary { background: var(--primary); color: #fff; }
+        .btn-primary:hover { background: var(--primary-hover); }
+        .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text-sec); }
+        .btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+        .btn-sm { padding: 6px 12px; font-size: 12px; }
+        .btn-ok { background: var(--success); color: #fff; text-decoration: none; padding: 12px 28px; display: block; text-align: center; border-radius: 8px; font-weight: 600; font-size: 15px; }
+        .btn-ok:hover { filter: brightness(.92); }
+        .alert { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
+
+        /* ── Drop Zone ── */
+        #drop-zone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 44px 20px; text-align: center; cursor: pointer; transition: all .2s; color: var(--text-sec); font-size: 15px; }
+        #drop-zone:hover, #drop-zone.dragover { border-color: var(--primary); background: rgba(99,102,241,.04); color: var(--primary); }
+        #drop-zone .icon { font-size: 40px; display: block; margin-bottom: 10px; }
+        #drop-zone .hint { font-size: 12px; margin-top: 6px; color: var(--text-sec); }
+        #file-input { display: none; }
+
+        /* ── Video Scrubber ── */
+        .video-wrap { position: relative; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 14px; }
+        .video-wrap video { width: 100%; max-height: 450px; display: block; margin: 0 auto; }
+        .scrub-bar { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
+        .scrub-bar input[type=range] { flex: 1; accent-color: var(--primary); }
+        .time-label { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; min-width: 50px; }
+        .capture-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .capture-row .btn { flex-shrink: 0; }
+        .step-btns { display: flex; gap: 4px; }
+        .step-btns button { padding: 6px 10px; font-size: 18px; line-height: 1; }
+
+        /* ── Frame Grid ── */
+        #frame-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+        .thumb { position: relative; border-radius: 8px; overflow: hidden; cursor: grab; border: 2px solid transparent; transition: all .15s; background: var(--bg); }
+        .thumb:hover { border-color: var(--primary); }
+        .thumb.dragging { opacity: .35; }
+        .thumb.drag-over { border-color: var(--primary); transform: scale(1.05); }
+        .thumb img { width: 100%; aspect-ratio: 9/16; object-fit: cover; display: block; }
+        .thumb-footer { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: rgba(0,0,0,.06); font-size: 11px; }
+        .thumb-num { background: var(--primary); color: #fff; border-radius: 4px; padding: 1px 6px; font-weight: 700; }
+        .thumb-fx { color: var(--text-sec); font-weight: 500; }
+        .thumb-time { color: var(--primary); font-size: 10px; font-weight: 600; }
+        .thumb-controls { padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
+        .thumb-controls select { width: 100%; padding: 3px 4px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; background: #fff; }
+        .thumb-dur { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-sec); }
+        .thumb-dur input { width: 52px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; text-align: center; }
+        .thumb-del { position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,.55); color: #fff; border: none; border-radius: 50%; width: 22px; height: 22px; font-size: 12px; cursor: pointer; display: none; align-items: center; justify-content: center; }
+        .thumb:hover .thumb-del { display: flex; }
+
+        /* ── Settings ── */
+        .setting-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+        .setting-row label { font-size: 13px; font-weight: 500; min-width: 80px; }
+        .ratio-btn { padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; transition: all .15s; }
+        .ratio-btn:hover { border-color: var(--primary); }
+        .ratio-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+        input[type=range] { flex: 1; max-width: 180px; accent-color: var(--primary); }
+        .info-bar { display: flex; gap: 16px; font-size: 13px; color: var(--text-sec); margin-bottom: 14px; flex-wrap: wrap; }
+        .info-bar span { display: flex; align-items: center; gap: 4px; }
+
+        /* ── Preview Canvas ── */
+        #preview-canvas { width: 100%; max-height: 500px; object-fit: contain; display: block; margin: 0 auto 14px; border-radius: 8px; background: #000; }
+        .action-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+        .prog-wrap { margin-top: 14px; background: var(--bg); border-radius: 8px; overflow: hidden; }
+        .prog-bar { height: 6px; background: var(--bg); border-radius: 8px; overflow: hidden; }
+        .prog-fill { height: 100%; width: 0%; background: var(--primary); transition: width .1s; }
+        .prog-text { text-align: center; font-size: 12px; color: var(--text-sec); padding: 6px 0; }
+        #download-info { text-align: center; font-size: 13px; color: var(--text-sec); margin-top: 10px; }
+
+        /* ── Or divider ── */
+        .or-divider { display: flex; align-items: center; gap: 12px; margin: 14px 0; color: var(--text-sec); font-size: 13px; }
+        .or-divider::before, .or-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+        @media (max-width: 560px) {
+            #app { padding: 16px 10px 40px; }
+            header h1 { font-size: 22px; }
+            #frame-list { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+        }
+    </style>
+</head>
+<body>
+<div id="app">
+    <header>
+        <h1>定格動畫生成器</h1>
+        <p>上傳影片，擷取關鍵畫面，自動生成定格動畫風格影片</p>
+    </header>
+
+    <div id="compat-alert" class="alert hidden">此功能需要 Chrome 94+ 或 Edge 94+，您的瀏覽器暫不支援影片編碼。</div>
+
+    <!-- Step 1: Upload -->
+    <div class="card" id="upload-card">
+        <div class="card-title">步驟一：上傳影片</div>
+        <div id="drop-zone">
+            <span class="icon">🎬</span>
+            <div>拖放影片到此處，或點擊上傳</div>
+            <div class="hint">支援 MP4、MOV、WebM</div>
+        </div>
+        <input type="file" id="file-input" accept="video/*">
+        <div class="or-divider">或直接上傳圖片</div>
+        <div id="drop-zone-img" style="border:2px dashed var(--border);border-radius:var(--radius);padding:20px;text-align:center;cursor:pointer;color:var(--text-sec);font-size:14px;transition:all .2s;">
+            <span style="font-size:28px;display:block;margin-bottom:6px;">📸</span>
+            拖放圖片到此處（JPG、PNG、WebP）
+        </div>
+        <input type="file" id="img-input" accept="image/*" multiple style="display:none;">
+    </div>
+
+    <!-- Step 2: Video Scrubber -->
+    <div id="scrubber-section" class="card hidden">
+        <div class="card-title">
+            <span>步驟二：擷取關鍵畫面</span>
+            <button class="btn btn-outline btn-sm" id="change-video-btn">換影片</button>
+        </div>
+        <div class="video-wrap">
+            <video id="src-video" playsinline></video>
+        </div>
+        <div class="scrub-bar">
+            <span class="time-label" id="cur-time">0:00</span>
+            <input type="range" id="scrub-range" min="0" max="100" step="0.01" value="0">
+            <span class="time-label" id="total-time" style="text-align:right;">0:00</span>
+        </div>
+        <div class="capture-row">
+            <div class="step-btns">
+                <button class="btn btn-outline btn-sm" id="back-5">-5s</button>
+                <button class="btn btn-outline btn-sm" id="back-1">-1s</button>
+                <button class="btn btn-outline btn-sm" id="fwd-1">+1s</button>
+                <button class="btn btn-outline btn-sm" id="fwd-5">+5s</button>
+            </div>
+            <button class="btn btn-primary" id="capture-btn">擷取此畫面</button>
+            <button class="btn btn-outline btn-sm" id="play-pause-btn">&#9654; 播放</button>
+        </div>
+    </div>
+
+    <!-- Step 3: Frame list -->
+    <div id="frames-section" class="card hidden">
+        <div class="card-title">
+            <span>步驟三：排列與設定</span>
+            <span style="display:flex;gap:6px;">
+                <button class="btn btn-outline btn-sm" id="add-img-btn">+ 加圖片</button>
+                <button class="btn btn-outline btn-sm" id="clear-btn" style="color:var(--danger);border-color:var(--danger);">清空</button>
+            </span>
+        </div>
+        <div class="info-bar">
+            <span>共 <strong id="i-cnt">0</strong> 張</span>
+            <span>單次 <strong id="i-dur">0</strong> 秒</span>
+            <span>總長 <strong id="i-total">0</strong> 秒</span>
+        </div>
+        <div id="frame-list"></div>
+    </div>
+
+    <!-- Settings -->
+    <div id="settings-section" class="card hidden">
+        <div class="card-title">影片設定</div>
+        <div class="setting-row">
+            <label>畫面比例</label>
+            <button class="ratio-btn active" data-r="9:16">9:16 直式</button>
+            <button class="ratio-btn" data-r="1:1">1:1 方形</button>
+            <button class="ratio-btn" data-r="16:9">16:9 橫式</button>
+        </div>
+        <div class="setting-row">
+            <label>循環次數</label>
+            <input type="range" id="loop-input" min="1" max="5" step="1" value="3">
+            <span id="loop-val" style="font-size:13px;font-weight:600;min-width:30px;">3 次</span>
+        </div>
+    </div>
+
+    <!-- Generate -->
+    <div id="action-section" class="card hidden">
+        <canvas id="preview-canvas" width="1080" height="1920"></canvas>
+        <div class="action-btns">
+            <button class="btn btn-outline" id="preview-btn">&#9654; 預覽</button>
+            <button class="btn btn-primary" id="gen-btn">生成 MP4</button>
+        </div>
+        <div class="prog-wrap hidden" id="prog-wrap">
+            <div class="prog-bar"><div class="prog-fill" id="prog-fill"></div></div>
+            <div class="prog-text" id="prog-text">準備中…</div>
+        </div>
+    </div>
+
+    <!-- Download -->
+    <div id="download-section" class="card hidden">
+        <div class="card-title" style="justify-content:center;">影片已完成</div>
+        <a id="dl-link" class="btn btn-ok" download="定格動畫.mp4">下載影片</a>
+        <div id="download-info"></div>
+    </div>
+</div>
+
+<script type="module">
+let Muxer, ArrayBufferTarget;
+try {
+    const m = await import('https://cdn.jsdelivr.net/npm/mp4-muxer/+esm');
+    Muxer = m.Muxer;
+    ArrayBufferTarget = m.ArrayBufferTarget;
+} catch (e) { console.warn('mp4-muxer load failed:', e); }
+
+const hasWC = typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined';
+if (!hasWC || !Muxer) document.getElementById('compat-alert').classList.remove('hidden');
+
+const FX_NAME = { static:'靜止(硬切)', zoom_in:'推近', zoom_out:'拉遠', pan_right:'右移', pan_left:'左移' };
+const FPS = 30;
+const DIMS = { '9:16':[1080,1920], '1:1':[1080,1080], '16:9':[1920,1080] };
+const SCALE = 1.15;
+
+let frames = []; // { bmp, url, fx, dur, srcTime }
+let ratio = '9:16';
+let loopCount = 3;
+let animId = null;
+let busy = false;
+
+const $ = id => document.getElementById(id);
+
+// ─── DOM refs ───
+const dropZone = $('drop-zone'), fileInput = $('file-input');
+const dropZoneImg = $('drop-zone-img'), imgInput = $('img-input');
+const uploadCard = $('upload-card');
+const scrubSec = $('scrubber-section');
+const framesSec = $('frames-section'), frameList = $('frame-list');
+const setSec = $('settings-section'), actSec = $('action-section');
+const dlSec = $('download-section');
+const canvas = $('preview-canvas');
+const prevBtn = $('preview-btn'), genBtn = $('gen-btn');
+const progWrap = $('prog-wrap'), progFill = $('prog-fill'), progText = $('prog-text');
+const dlLink = $('dl-link'), dlInfo = $('download-info');
+const video = $('src-video'), scrubRange = $('scrub-range');
+const curTime = $('cur-time'), totalTime = $('total-time');
+
+function fmtTime(s) {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    const ms = Math.floor((s % 1) * 10);
+    return `${m}:${String(sec).padStart(2,'0')}.${ms}`;
+}
+
+// ─── Video upload ───
+dropZone.onclick = () => fileInput.click();
+fileInput.onchange = e => { if (e.target.files[0]) loadVideo(e.target.files[0]); fileInput.value = ''; };
+dropZone.ondragover = e => { e.preventDefault(); dropZone.classList.add('dragover'); };
+dropZone.ondragleave = () => dropZone.classList.remove('dragover');
+dropZone.ondrop = e => {
+    e.preventDefault(); dropZone.classList.remove('dragover');
+    const f = [...e.dataTransfer.files].find(f => f.type.startsWith('video/'));
+    if (f) loadVideo(f);
+};
+
+function loadVideo(file) {
+    const url = URL.createObjectURL(file);
+    video.src = url;
+    video.onloadedmetadata = () => {
+        scrubRange.max = video.duration;
+        totalTime.textContent = fmtTime(video.duration);
+        scrubSec.classList.remove('hidden');
+        uploadCard.classList.add('hidden');
+    };
+}
+
+$('change-video-btn').onclick = () => {
+    scrubSec.classList.add('hidden');
+    uploadCard.classList.remove('hidden');
+    video.pause();
+    video.src = '';
+};
+
+// ─── Image upload ───
+dropZoneImg.onclick = () => imgInput.click();
+dropZoneImg.ondragover = e => { e.preventDefault(); dropZoneImg.style.borderColor = 'var(--primary)'; };
+dropZoneImg.ondragleave = () => { dropZoneImg.style.borderColor = 'var(--border)'; };
+dropZoneImg.ondrop = e => {
+    e.preventDefault(); dropZoneImg.style.borderColor = 'var(--border)';
+    addImageFiles([...e.dataTransfer.files].filter(f => f.type.startsWith('image/')));
+};
+imgInput.onchange = e => { addImageFiles(e.target.files); imgInput.value = ''; };
+
+$('add-img-btn').onclick = () => imgInput.click();
+
+async function addImageFiles(fileList) {
+    for (const f of [...fileList].filter(f => f.type.startsWith('image/'))) {
+        const bmp = await createImageBitmap(f);
+        frames.push({ bmp, url: URL.createObjectURL(f), fx: 'static', dur: 1.2, srcTime: null });
+    }
+    refreshFrames();
+}
+
+// ─── Video scrubber ───
+scrubRange.oninput = () => {
+    video.currentTime = parseFloat(scrubRange.value);
+};
+video.ontimeupdate = () => {
+    if (!video.seeking) scrubRange.value = video.currentTime;
+    curTime.textContent = fmtTime(video.currentTime);
+};
+
+$('back-5').onclick = () => { video.currentTime = Math.max(0, video.currentTime - 5); };
+$('back-1').onclick = () => { video.currentTime = Math.max(0, video.currentTime - 1); };
+$('fwd-1').onclick = () => { video.currentTime = Math.min(video.duration, video.currentTime + 1); };
+$('fwd-5').onclick = () => { video.currentTime = Math.min(video.duration, video.currentTime + 5); };
+
+$('play-pause-btn').onclick = () => {
+    if (video.paused) { video.play(); $('play-pause-btn').innerHTML = '&#9632; 暫停'; }
+    else { video.pause(); $('play-pause-btn').innerHTML = '&#9654; 播放'; }
+};
+video.onpause = () => { $('play-pause-btn').innerHTML = '&#9654; 播放'; };
+video.onplay = () => { $('play-pause-btn').innerHTML = '&#9632; 暫停'; };
+
+// ─── Capture frame ───
+$('capture-btn').onclick = async () => {
+    video.pause();
+    const c = document.createElement('canvas');
+    c.width = video.videoWidth;
+    c.height = video.videoHeight;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+    const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+    const bmp = await createImageBitmap(blob);
+    const url = URL.createObjectURL(blob);
+    frames.push({ bmp, url, fx: 'static', dur: 1.2, srcTime: video.currentTime });
+    refreshFrames();
+};
+
+// ─── Frame list ───
+$('clear-btn').onclick = () => {
+    frames.forEach(f => { URL.revokeObjectURL(f.url); f.bmp.close(); });
+    frames = [];
+    refreshFrames();
+};
+
+let dragIdx = null;
+
+function refreshFrames() {
+    const has = frames.length > 0;
+    framesSec.classList.toggle('hidden', !has);
+    setSec.classList.toggle('hidden', !has);
+    actSec.classList.toggle('hidden', !has);
+    if (has) { renderFrameList(); updateInfo(); setCanvasSize(); }
+    hideDl();
+}
+
+function renderFrameList() {
+    frameList.innerHTML = '';
+    frames.forEach((fr, i) => {
+        const d = document.createElement('div');
+        d.className = 'thumb';
+        d.draggable = true;
+
+        const timeStr = fr.srcTime !== null ? fmtTime(fr.srcTime) : '圖片';
+        d.innerHTML = `
+            <img src="${fr.url}" alt="">
+            <div class="thumb-footer">
+                <span class="thumb-num">${i+1}</span>
+                <span class="thumb-time">${timeStr}</span>
+                <span class="thumb-fx">${FX_NAME[fr.fx].replace('(硬切)','')}</span>
+            </div>
+            <div class="thumb-controls">
+                <select class="fx-select">
+                    ${Object.keys(FX_NAME).map(k => `<option value="${k}" ${k===fr.fx?'selected':''}>${FX_NAME[k]}</option>`).join('')}
+                </select>
+                <div class="thumb-dur">
+                    <input type="number" min="0.3" max="10" step="0.1" value="${fr.dur}">
+                    <span>秒</span>
+                </div>
+            </div>
+            <button class="thumb-del">&#10005;</button>`;
+
+        d.querySelector('.fx-select').onchange = function() {
+            frames[i].fx = this.value;
+            d.querySelector('.thumb-fx').textContent = FX_NAME[this.value].replace('(硬切)','');
+            hideDl();
+        };
+        const durInput = d.querySelector('.thumb-dur input');
+        durInput.onchange = function() {
+            frames[i].dur = Math.max(0.3, parseFloat(this.value) || 1.2);
+            this.value = frames[i].dur;
+            updateInfo(); hideDl();
+        };
+
+        // Prevent drag on inputs
+        [d.querySelector('.fx-select'), durInput].forEach(el => {
+            el.ondragstart = e => e.stopPropagation();
+            el.onmousedown = e => e.stopPropagation();
+        });
+
+        // Drag reorder
+        d.addEventListener('dragstart', e => {
+            if (['SELECT','INPUT'].includes(e.target.tagName)) { e.preventDefault(); return; }
+            dragIdx = i; d.classList.add('dragging');
+        });
+        d.addEventListener('dragend', () => { d.classList.remove('dragging'); document.querySelectorAll('.thumb').forEach(t => t.classList.remove('drag-over')); });
+        d.addEventListener('dragover', e => { e.preventDefault(); d.classList.add('drag-over'); });
+        d.addEventListener('dragleave', () => d.classList.remove('drag-over'));
+        d.addEventListener('drop', e => {
+            e.preventDefault(); d.classList.remove('drag-over');
+            if (dragIdx !== null && dragIdx !== i) {
+                const [moved] = frames.splice(dragIdx, 1);
+                frames.splice(i, 0, moved);
+                renderFrameList(); hideDl();
+            }
+        });
+
+        d.querySelector('.thumb-del').onclick = ev => {
+            ev.stopPropagation();
+            URL.revokeObjectURL(frames[i].url); frames[i].bmp.close();
+            frames.splice(i, 1);
+            refreshFrames();
+        };
+
+        frameList.appendChild(d);
+    });
+}
+
+// ─── Settings ───
+document.querySelectorAll('.ratio-btn').forEach(b => {
+    b.onclick = () => {
+        document.querySelectorAll('.ratio-btn').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        ratio = b.dataset.r;
+        updateInfo(); setCanvasSize(); hideDl();
+    };
+});
+
+$('loop-input').oninput = function() {
+    loopCount = parseInt(this.value);
+    $('loop-val').textContent = loopCount + ' 次';
+    updateInfo(); hideDl();
+};
+
+function updateInfo() {
+    $('i-cnt').textContent = frames.length;
+    const single = frames.reduce((s, f) => s + f.dur, 0);
+    $('i-dur').textContent = single.toFixed(1);
+    $('i-total').textContent = (single * loopCount).toFixed(1);
+}
+
+function setCanvasSize() {
+    const [W, H] = DIMS[ratio];
+    canvas.width = W; canvas.height = H;
+    if (frames.length) {
+        const ctx = canvas.getContext('2d');
+        drawFrame(ctx, frames[0].bmp, frames[0].fx, 0, W, H, 1);
+    }
+}
+
+function hideDl() {
+    dlSec.classList.add('hidden');
+    if (dlLink.href && dlLink.href.startsWith('blob:')) URL.revokeObjectURL(dlLink.href);
+    dlLink.removeAttribute('href');
+}
+
+// ─── Drawing ───
+function drawFrame(ctx, bmp, effect, t, W, H, alpha) {
+    const iw = bmp.width, ih = bmp.height;
+    const tr = W / H;
+    let cx, cy, cw, ch;
+    if (iw / ih > tr) { ch = ih; cw = ih * tr; cx = (iw - cw) / 2; cy = 0; }
+    else { cw = iw; ch = iw / tr; cx = 0; cy = (ih - ch) / 2; }
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    if (effect === 'static') {
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(bmp, cx, cy, cw, ch, 0, 0, W, H);
+        ctx.globalAlpha = 1;
+        return;
+    }
+
+    const bW = W * SCALE, bH = H * SCALE;
+    let x, y, sw, sh;
+    switch (effect) {
+        case 'zoom_in':  sw = bW-(bW-W)*t; sh = bH-(bH-H)*t; x = (bW-sw)/2; y = (bH-sh)/2; break;
+        case 'zoom_out': sw = W+(bW-W)*t;  sh = H+(bH-H)*t;  x = (bW-sw)/2; y = (bH-sh)/2; break;
+        case 'pan_right': sw = W; sh = H; x = (bW-W)*t;     y = (bH-H)/2; break;
+        case 'pan_left':  sw = W; sh = H; x = (bW-W)*(1-t); y = (bH-H)/2; break;
+    }
+    const sx = cx + (x/bW)*cw, sy = cy + (y/bH)*ch;
+    const sW = (sw/bW)*cw, sH = (sh/bH)*ch;
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(bmp, sx, sy, sW, sH, 0, 0, W, H);
+    ctx.globalAlpha = 1;
+}
+
+// ─── Preview ───
+prevBtn.onclick = () => {
+    if (animId) { cancelAnimationFrame(animId); animId = null; prevBtn.innerHTML = '&#9654; 預覽'; return; }
+    if (!frames.length) return;
+    prevBtn.innerHTML = '&#9632; 停止';
+    const [W, H] = DIMS[ratio];
+    const ctx = canvas.getContext('2d');
+    const totalDur = frames.reduce((s, f) => s + f.dur, 0);
+    const t0 = performance.now();
+    (function tick() {
+        let el = ((performance.now() - t0) / 1000) % totalDur;
+        let acc = 0, idx = 0;
+        for (let i = 0; i < frames.length; i++) {
+            if (el < acc + frames[i].dur) { idx = i; break; }
+            acc += frames[i].dur;
+            if (i === frames.length - 1) idx = i;
+        }
+        const p = (el - acc) / frames[idx].dur;
+        drawFrame(ctx, frames[idx].bmp, frames[idx].fx, p, W, H, 1);
+        animId = requestAnimationFrame(tick);
+    })();
+};
+
+// ─── Generate MP4 ───
+genBtn.onclick = async () => {
+    if (busy || !frames.length) return;
+    if (!hasWC || !Muxer) { alert('您的瀏覽器不支援影片編碼，請使用 Chrome 94+ 或 Edge 94+'); return; }
+
+    busy = true; genBtn.disabled = true; prevBtn.disabled = true;
+    progWrap.classList.remove('hidden'); hideDl();
+    if (animId) { cancelAnimationFrame(animId); animId = null; prevBtn.innerHTML = '&#9654; 預覽'; }
+
+    const [W, H] = DIMS[ratio];
+    const imgFrames = frames.map(f => Math.round(f.dur * FPS));
+    const framesPerLoop = imgFrames.reduce((a, b) => a + b, 0);
+    const totalF = framesPerLoop * loopCount;
+    let done = 0;
+
+    try {
+        const target = new ArrayBufferTarget();
+        const muxer = new Muxer({ target, video: { codec: 'avc', width: W, height: H }, fastStart: 'in-memory' });
+        const encoder = new VideoEncoder({
+            output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+            error: e => { throw e; },
+        });
+        let codec = 'avc1.4d0028';
+        const ok = await VideoEncoder.isConfigSupported({ codec, width: W, height: H, bitrate: 10_000_000 });
+        if (!ok.supported) codec = 'avc1.42001f';
+        encoder.configure({ codec, width: W, height: H, bitrate: 10_000_000, framerate: FPS });
+
+        const oc = new OffscreenCanvas(W, H);
+        const ctx = oc.getContext('2d');
+
+        for (let loop = 0; loop < loopCount; loop++) {
+            for (let i = 0; i < frames.length; i++) {
+                const fpI = imgFrames[i];
+                for (let f = 0; f < fpI; f++) {
+                    const t = fpI > 1 ? f / (fpI - 1) : 0;
+                    drawFrame(ctx, frames[i].bmp, frames[i].fx, t, W, H, 1);
+
+                    const gi = loop * framesPerLoop + imgFrames.slice(0, i).reduce((a, b) => a + b, 0) + f;
+                    const frame = new VideoFrame(oc, {
+                        timestamp: Math.round(gi * 1_000_000 / FPS),
+                        duration: Math.round(1_000_000 / FPS),
+                    });
+                    encoder.encode(frame, { keyFrame: f === 0 });
+                    frame.close();
+
+                    done++;
+                    if (done % 15 === 0) {
+                        const pct = Math.round(done / totalF * 100);
+                        progFill.style.width = pct + '%';
+                        progText.textContent = `編碼中 ${pct}%（${done}/${totalF} 幀）`;
+                        await new Promise(r => setTimeout(r, 0));
+                    }
+                    while (encoder.encodeQueueSize > 20) await new Promise(r => setTimeout(r, 1));
+                }
+            }
+        }
+
+        progText.textContent = '正在完成編碼…';
+        await encoder.flush(); encoder.close(); muxer.finalize();
+
+        const blob = new Blob([target.buffer], { type: 'video/mp4' });
+        dlLink.href = URL.createObjectURL(blob);
+        dlSec.classList.remove('hidden');
+        const mb = (blob.size / 1048576).toFixed(1);
+        const totalSec = frames.reduce((s, f) => s + f.dur, 0) * loopCount;
+        dlInfo.textContent = `${frames.length} 張 × ${loopCount} 次 = ${totalSec.toFixed(1)} 秒 ｜ ${W}×${H} ｜ ${mb} MB`;
+        progFill.style.width = '100%';
+        progText.textContent = '完成！';
+    } catch (e) {
+        console.error(e);
+        progText.textContent = '生成失敗：' + e.message;
+    } finally {
+        busy = false; genBtn.disabled = false; prevBtn.disabled = false;
+    }
+};
+</script>
+</body>
+</html>
