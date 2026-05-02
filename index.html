@@ -81,6 +81,9 @@
         .ratio-btn:hover { border-color: var(--primary); }
         .ratio-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
         input[type=range] { flex: 1; max-width: 180px; accent-color: var(--primary); }
+        .toggle-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+        .toggle-label input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--primary); cursor: pointer; }
+        .toggle-desc { font-size: 11px; color: var(--text-sec); margin-left: 92px; margin-top: -8px; margin-bottom: 8px; }
         .info-bar { display: flex; gap: 16px; font-size: 13px; color: var(--text-sec); margin-bottom: 14px; flex-wrap: wrap; }
         .info-bar span { display: flex; align-items: center; gap: 4px; }
 
@@ -187,6 +190,14 @@
             <input type="range" id="loop-input" min="1" max="5" step="1" value="3">
             <span id="loop-val" style="font-size:13px;font-weight:600;min-width:30px;">3 次</span>
         </div>
+        <div class="setting-row">
+            <label>色彩調校</label>
+            <label class="toggle-label">
+                <input type="checkbox" id="grading-toggle">
+                <span>光影增強 + 自然飽和度</span>
+            </label>
+        </div>
+        <div class="toggle-desc">提亮 +4%、對比 +8%、暖色調自然飽和度、S 曲線明暗層次</div>
     </div>
 
     <!-- Generate -->
@@ -229,8 +240,63 @@ const SCALE = 1.15;
 let frames = []; // { bmp, url, fx, dur, srcTime }
 let ratio = '9:16';
 let loopCount = 3;
+let colorGrading = false;
 let animId = null;
 let busy = false;
+
+// ─── Color Grading LUTs ───
+function buildGradingLUTs() {
+    const brightness = 0.04, contrast = 1.08, gamma = 0.95;
+    const masterPts = [[0,0],[0.25,0.20],[0.5,0.52],[0.75,0.82],[1,1]];
+    const redPts = [[0,0],[0.5,0.52],[1,1]];
+    const bluePts = [[0,0],[0.5,0.48],[1,1]];
+
+    function interp(pts, x) {
+        for (let j = 0; j < pts.length - 1; j++) {
+            if (x <= pts[j+1][0]) {
+                const t = (x - pts[j][0]) / (pts[j+1][0] - pts[j][0]);
+                return pts[j][1] + t * (pts[j+1][1] - pts[j][1]);
+            }
+        }
+        return x;
+    }
+
+    function makeLUT(chPts) {
+        const lut = new Uint8Array(256);
+        for (let i = 0; i < 256; i++) {
+            let v = Math.pow(i / 255, gamma);
+            v = (v + brightness - 0.5) * contrast + 0.5;
+            v = Math.max(0, Math.min(1, v));
+            v = interp(masterPts, v);
+            if (chPts) v = interp(chPts, v);
+            lut[i] = Math.max(0, Math.min(255, Math.round(v * 255)));
+        }
+        return lut;
+    }
+
+    return { r: makeLUT(redPts), g: makeLUT(null), b: makeLUT(bluePts) };
+}
+
+const gradingLUTs = buildGradingLUTs();
+
+function applyColorGrading(ctx, W, H) {
+    const imageData = ctx.getImageData(0, 0, W, H);
+    const d = imageData.data;
+    const { r: rL, g: gL, b: bL } = gradingLUTs;
+    for (let i = 0; i < d.length; i += 4) {
+        let r = rL[d[i]], g = gL[d[i+1]], b = bL[d[i+2]];
+        const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+        const sat = mx > 0 ? 1 - mn / mx : 0;
+        const avg = (r + g + b) / 3;
+        const boost = 0.3 * (1 - sat);
+        d[i]   = Math.max(0, Math.min(255, r + (r - avg) * boost * 1.0 + 0.5 | 0));
+        d[i+1] = Math.max(0, Math.min(255, g + (g - avg) * boost * 0.8 + 0.5 | 0));
+        d[i+2] = Math.max(0, Math.min(255, b + (b - avg) * boost * 0.6 + 0.5 | 0));
+    }
+    ctx.putImageData(imageData, 0, 0);
+}
+
+const CSS_GRADING_FILTER = 'brightness(1.04) contrast(1.08) saturate(1.2)';
 
 const $ = id => document.getElementById(id);
 
@@ -447,6 +513,11 @@ $('loop-input').oninput = function() {
     updateInfo(); hideDl();
 };
 
+$('grading-toggle').onchange = function() {
+    colorGrading = this.checked;
+    setCanvasSize(); hideDl();
+};
+
 function updateInfo() {
     $('i-cnt').textContent = frames.length;
     const single = frames.reduce((s, f) => s + f.dur, 0);
@@ -459,7 +530,9 @@ function setCanvasSize() {
     canvas.width = W; canvas.height = H;
     if (frames.length) {
         const ctx = canvas.getContext('2d');
+        ctx.filter = colorGrading ? CSS_GRADING_FILTER : 'none';
         drawFrame(ctx, frames[0].bmp, frames[0].fx, 0, W, H, 1);
+        ctx.filter = 'none';
     }
 }
 
@@ -509,6 +582,7 @@ prevBtn.onclick = () => {
     prevBtn.innerHTML = '&#9632; 停止';
     const [W, H] = DIMS[ratio];
     const ctx = canvas.getContext('2d');
+    ctx.filter = colorGrading ? CSS_GRADING_FILTER : 'none';
     const totalDur = frames.reduce((s, f) => s + f.dur, 0);
     const t0 = performance.now();
     (function tick() {
@@ -555,12 +629,27 @@ genBtn.onclick = async () => {
         const oc = new OffscreenCanvas(W, H);
         const ctx = oc.getContext('2d');
 
+        const gradedCache = new Map();
+
         for (let loop = 0; loop < loopCount; loop++) {
             for (let i = 0; i < frames.length; i++) {
                 const fpI = imgFrames[i];
+                const isStatic = frames[i].fx === 'static';
+
+                if (isStatic && colorGrading && !gradedCache.has(i)) {
+                    drawFrame(ctx, frames[i].bmp, frames[i].fx, 0, W, H, 1);
+                    applyColorGrading(ctx, W, H);
+                    gradedCache.set(i, ctx.getImageData(0, 0, W, H));
+                }
+
                 for (let f = 0; f < fpI; f++) {
-                    const t = fpI > 1 ? f / (fpI - 1) : 0;
-                    drawFrame(ctx, frames[i].bmp, frames[i].fx, t, W, H, 1);
+                    if (isStatic && colorGrading) {
+                        ctx.putImageData(gradedCache.get(i), 0, 0);
+                    } else {
+                        const t = fpI > 1 ? f / (fpI - 1) : 0;
+                        drawFrame(ctx, frames[i].bmp, frames[i].fx, t, W, H, 1);
+                        if (colorGrading) applyColorGrading(ctx, W, H);
+                    }
 
                     const gi = loop * framesPerLoop + imgFrames.slice(0, i).reduce((a, b) => a + b, 0) + f;
                     const frame = new VideoFrame(oc, {
